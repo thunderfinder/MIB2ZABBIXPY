@@ -380,7 +380,116 @@ Antes de comenzar, asegúrate de tener instalado lo siguiente:
 
 Este script es una herramienta de ayuda, no genera automáticamente templates perfectos. Es importante revisar y personalizar los items y reglas de descubrimiento antes de importarlos a Zabbix.
 
-¿Quieres que te ayude también a crear un script de lote (`.bat`) para facilitar su uso en Windows?
+
+README Adicional para Uso con Archivos MIB mib2template.py
+📁 Uso con Archivos MIB 
+
+Esta versión del script permite generar plantillas de Zabbix directamente desde archivos MIB sin necesidad de acceder a dispositivos SNMP. 
+🛠 Requisitos Previos 
+````bash
+# Debian/Ubuntu
+sudo apt install python3 snmp snmp-mibs-downloader
+
+# RedHat/CentOS/Rocky
+sudo yum install python3 net-snmp net-snmp-utils
+ ````
+ 
+📥 Descargar y Usar 
+````bash
+ 
+# Descargar el script
+wget -O mib2template.py https://raw.githubusercontent.com/tu-repo/mib2template.py
+
+# Hacerlo ejecutable
+chmod +x mib2template.py
+ ````
+ 
+🎯 Ejemplos de Uso 
+
+```bash
+ 
+# Generar template desde un MIB específico
+python3 mib2template.py -f /usr/share/snmp/mibs/UCD-SNMP-MIB.txt -m UCD-SNMP-MIB -N "UCD SNMP Template"
+
+# Generar template con configuración personalizada
+python3 mib2template.py \
+  -f /path/to/custom.mib \
+  -m CUSTOM-MIB \
+  -N "Custom Template" \
+  -G "Custom Templates" \
+  --check-delay 30 \
+  --history 30 \
+  -o custom-template.xml
+
+# Generar template y habilitar items por defecto
+python3 mib2template.py -f /usr/share/snmp/mibs/SNMPv2-MIB.txt -m SNMPv2-MIB -e
+ ````
+ 
+📋 Parámetros Disponibles 
+````bash
+ 
+ usage: mib2template.py [-h] -f MIB_FILE -m MODULE [-o OUTPUT] [-N TEMPLATE_NAME] [-G GROUP] [-e]
+                       [-v {1,2,3}] [-p PORT] [-c COMMUNITY] [-L {noAuthNoPriv,authNoPriv,authPriv}]
+                       [-u USERNAME] [-a {MD5,SHA}] [-A AUTH_PASS] [-x {DES,AES}] [-X PRIV_PASS]
+                       [--check-delay CHECK_DELAY] [--disc-delay DISC_DELAY] [--history HISTORY]
+                       [--trends TRENDS]
+
+Generate Zabbix template from MIB file
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -f MIB_FILE, --mib-file MIB_FILE
+                        Path to MIB file
+  -m MODULE, --module MODULE
+                        MIB module name
+  -o OUTPUT, --output OUTPUT
+                        Output filename (default: stdout)
+  -N TEMPLATE_NAME, --template-name TEMPLATE_NAME
+                        Template name (default: module name)
+  -G GROUP, --group GROUP
+                        Template group (default: Templates)
+  -e, --enable-items    Enable all template items (default: disabled)
+  -v {1,2,3}, --snmp-version {1,2,3}
+                        SNMP version (default: 2)
+  -p PORT, --port PORT  SNMP port (default: 161)
+  -c COMMUNITY, --community COMMUNITY
+                        SNMP community (default: public)
+  -L {noAuthNoPriv,authNoPriv,authPriv}, --sec-level {noAuthNoPriv,authNoPriv,authPriv}
+                        Security level
+  -u USERNAME, --username USERNAME
+                        Security name
+  -a {MD5,SHA}, --auth-proto {MD5,SHA}
+                        Authentication protocol
+  -A AUTH_PASS, --auth-pass AUTH_PASS
+                        Authentication passphrase
+  -x {DES,AES}, --priv-proto {DES,AES}
+                        Privacy protocol
+  -X PRIV_PASS, --priv-pass PRIV_PASS
+                        Privacy passphrase
+  --check-delay CHECK_DELAY
+                        Check interval in seconds (default: 60)
+  --disc-delay DISC_DELAY
+                        Discovery interval in seconds (default: 3600)
+  --history HISTORY     History retention in days (default: 7)
+  --trends TRENDS       Trends retention in days (default: 365)
+````
+ 
+⚠️ Notas Importantes 
+
+    Los MIBs deben estar en formato válido  y accesibles para las herramientas SNMP.
+    Algunos MIBs comerciales pueden requerir licencias  o configuración adicional.
+    Los items se generan deshabilitados por defecto  para evitar sobrecarga.
+    Es recomendable revisar el template generado  antes de importarlo a Zabbix.
+     
+
+📤 Importar Template a Zabbix 
+
+    Accede a la interfaz web de Zabbix
+    Ve a Configuration  → Templates  → Import 
+    Selecciona el archivo XML generado
+    Revisa y ajusta los items según sea necesario
+    Habilita los items que requieras monitorear
+     
 
 ## Notas importantes
 
