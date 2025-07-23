@@ -4,6 +4,7 @@ mib2zabbix-py - SNMP Template Generator for Zabbix
 Combina las funcionalidades de mib2zabbix (Perl) y SNMPWALK2ZABBIX (Python)
 
 Copyright (C) 2024 - Basado en trabajos de Ryan Armstrong y Sean Bradley
+Distribuido bajo la licencia GNU GPL v2 o posterior
 """
 
 import sys
@@ -15,7 +16,7 @@ import subprocess
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
 
-# Mapeo de tipos de datos
+# Mapeo de tipos de datos SNMP a Zabbix
 DATATYPES = {
     "STRING": "CHAR",
     "OID": "CHAR", 
@@ -44,6 +45,8 @@ DATATYPES = {
 }
 
 class MIBProcessor:
+    """Procesador de información MIB"""
+    
     def __init__(self):
         self.items = []
         self.discovery_rules = {}
@@ -51,117 +54,186 @@ class MIBProcessor:
         self.last_part_10 = ""
         
     def get_data_type(self, snmp_type):
-        """Obtiene el tipo de dato Zabbix correspondiente"""
+        """
+        Obtiene el tipo de dato Zabbix correspondiente al tipo SNMP
+        
+        Args:
+            snmp_type (str): Tipo de dato SNMP
+            
+        Returns:
+            str: Tipo de dato Zabbix correspondiente
+        """
         data_type = DATATYPES.get(snmp_type.upper(), "TEXT")
         if data_type == snmp_type.upper():
             print(f"Unhandled data type [{snmp_type}] so assigning TEXT")
         return data_type if data_type != "" else None
         
     def get_mib_info(self, oid):
-        """Obtiene información MIB para un OID"""
+        """
+        Obtiene información MIB para un OID específico
+        
+        Args:
+            oid (str): OID a consultar
+            
+        Returns:
+            tuple: (nombre_completo, descripcion, oid_formateado)
+        """
         try:
-            # Nombre completo
+            # Obtener nombre completo del OID
             full_name = subprocess.check_output(['snmptranslate', '-Tz', oid.strip()], 
                                               stderr=subprocess.DEVNULL, text=True).strip()
-            # Descripción
+            
+            # Obtener descripción del OID
             description_raw = subprocess.check_output(['snmptranslate', '-Td', oid.strip()], 
                                                     stderr=subprocess.DEVNULL, text=True)
-            # Extraer descripción
+            
+            # Extraer descripción usando expresión regular
             desc_match = re.search(r'DESCRIPTION\s+"([^"]*)"', description_raw)
             description = desc_match.group(1) if desc_match else ""
             description = description.replace('\n', '&#13;').replace('<', '<').replace('>', '>')
             description = re.sub(r"\s\s+", " ", description)
             
-            # OID formateado
+            # Obtener OID formateado
             formatted_oid = subprocess.check_output(['snmptranslate', '-Of', oid.strip()], 
                                                   stderr=subprocess.DEVNULL, text=True).strip()
             
             return full_name, description, formatted_oid
         except subprocess.CalledProcessError:
+            # En caso de error, devolver valores por defecto
             return oid.strip(), "", oid.strip()
 
 class MIB2ZabbixGenerator:
+    """Generador de plantillas Zabbix desde MIBs o SNMP walk"""
+    
     def __init__(self):
         self.processor = MIBProcessor()
         self.args = None
         
     def parse_arguments(self):
         """Parsea argumentos de línea de comandos"""
-        parser = argparse.ArgumentParser(description='Generate Zabbix template from MIB files or SNMP walk')
+        parser = argparse.ArgumentParser(
+            description='Generate Zabbix template from MIB files or SNMP walk',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Ejemplos de uso:
+  # Modo walk - genera plantilla desde dispositivo SNMP
+  python3 mib2zabbix-py.py --mode walk --ip 192.168.1.1 -o .1.3.6.1.2.1 -c public
+
+  # Modo MIB - genera plantilla desde archivos MIB
+  python3 mib2zabbix-py.py --mode mib -o .1.3.6.1.2.1.1 -N "Mi Template"
+
+  # Con SNMP v3
+  python3 mib2zabbix-py.py --mode walk -v 3 -u myuser -L authPriv -a SHA -A mypass -x AES -X mypriv --ip 192.168.1.1 -o .1.3.6.1.2.1
+            """
+        )
         
         # Modo de operación
         parser.add_argument('--mode', choices=['mib', 'walk'], default='mib',
-                          help='Operation mode: mib (from MIB file) or walk (from SNMP walk)')
+                          help='Modo de operación: mib (desde archivo MIB) o walk (desde SNMP walk)')
         
         # Parámetros generales
         parser.add_argument('-o', '--oid', required=True,
-                          help='Root OID to process (must start with . for MIB mode)')
+                          help='OID raíz a procesar (debe comenzar con . para modo MIB)')
         parser.add_argument('-f', '--filename', default='stdout',
-                          help='Output filename (default: stdout)')
-        parser.add_argument('-N', '--name', help='Template name (default: auto-generated)')
+                          help='Nombre de archivo de salida (por defecto: stdout)')
+        parser.add_argument('-N', '--name', help='Nombre del template (por defecto: auto-generado)')
         parser.add_argument('-G', '--group', default='Templates',
-                          help='Template group (default: Templates)')
+                          help='Grupo del template (por defecto: Templates)')
         parser.add_argument('-e', '--enable-items', action='store_true',
-                          help='Enable all template items (default: disabled)')
+                          help='Habilitar todos los items del template (por defecto: deshabilitados)')
         
-        # SNMP parámetros
+        # Parámetros SNMP
         parser.add_argument('-v', '--snmpver', choices=['1', '2', '3'], default='2',
-                          help='SNMP version (default: 2)')
+                          help='Versión SNMP (por defecto: 2)')
         parser.add_argument('-p', '--port', default='161',
-                          help='SNMP UDP port number (default: 161)')
+                          help='Puerto UDP SNMP (por defecto: 161)')
         
-        # SNMP v1/v2c específicos
+        # Parámetros SNMP v1/v2c
         parser.add_argument('-c', '--community', default='public',
-                          help='SNMP community string (default: public)')
+                          help='Cadena de comunidad SNMP (por defecto: public)')
         
-        # SNMP v3 específicos
+        # Parámetros SNMP v3
         parser.add_argument('-L', '--level', choices=['noAuthNoPriv', 'authNoPriv', 'authPriv'],
-                          help='Security level')
-        parser.add_argument('-n', '--context', help='Context name')
-        parser.add_argument('-u', '--username', help='Security name')
-        parser.add_argument('-a', '--auth', choices=['MD5', 'SHA'], help='Authentication protocol')
-        parser.add_argument('-A', '--authpass', help='Authentication passphrase')
-        parser.add_argument('-x', '--privacy', choices=['DES', 'AES'], help='Privacy protocol')
-        parser.add_argument('-X', '--privpass', help='Privacy passphrase')
+                          help='Nivel de seguridad')
+        parser.add_argument('-n', '--context', help='Nombre de contexto')
+        parser.add_argument('-u', '--username', help='Nombre de usuario de seguridad')
+        parser.add_argument('-a', '--auth', choices=['MD5', 'SHA'], help='Protocolo de autenticación')
+        parser.add_argument('-A', '--authpass', help='Frase de contraseña de autenticación')
+        parser.add_argument('-x', '--privacy', choices=['DES', 'AES'], help='Protocolo de privacidad')
+        parser.add_argument('-X', '--privpass', help='Frase de contraseña de privacidad')
         
         # Configuración de items
         parser.add_argument('--check-delay', default='60',
-                          help='Check interval in seconds (default: 60)')
+                          help='Intervalo de chequeo en segundos (por defecto: 60)')
         parser.add_argument('--disc-delay', default='3600',
-                          help='Discovery interval in seconds (default: 3600)')
+                          help='Intervalo de descubrimiento en segundos (por defecto: 3600)')
         parser.add_argument('--history', default='7',
-                          help='History retention in days (default: 7)')
+                          help='Retención de historial en días (por defecto: 7)')
         parser.add_argument('--trends', default='365',
-                          help='Trends retention in days (default: 365)')
+                          help='Retención de tendencias en días (por defecto: 365)')
         
         # Parámetros para modo walk
-        parser.add_argument('--ip', help='IP address for SNMP walk mode')
+        parser.add_argument('--ip', help='Dirección IP para modo walk')
         
         self.args = parser.parse_args()
         
-        # Validaciones
+        # Validaciones adicionales
         if self.args.mode == 'walk' and not self.args.ip:
-            parser.error("--ip is required for walk mode")
+            parser.error("--ip es requerido para modo walk")
+            
+    def build_snmp_command(self):
+        """
+        Construye el comando snmpwalk basado en los argumentos proporcionados
+        
+        Returns:
+            list: Lista de argumentos para subprocess
+        """
+        cmd = ['snmpwalk', '-v', self.args.snmpver, '-On']
+        
+        # Agregar parámetros según la versión SNMP
+        if self.args.snmpver in ['1', '2']:
+            cmd.extend(['-c', self.args.community])
+        elif self.args.snmpver == '3':
+            # Construir parámetros SNMP v3
+            if self.args.level:
+                cmd.extend(['-l', self.args.level])
+            if self.args.username:
+                cmd.extend(['-u', self.args.username])
+            if self.args.auth:
+                cmd.extend(['-a', self.args.auth])
+            if self.args.authpass:
+                cmd.extend(['-A', self.args.authpass])
+            if self.args.privacy:
+                cmd.extend(['-x', self.args.privacy])
+            if self.args.privpass:
+                cmd.extend(['-X', self.args.privpass])
+            if self.args.context:
+                cmd.extend(['-n', self.args.context])
+        
+        # Agregar IP, puerto y OID
+        cmd.append(f'{self.args.ip}:{self.args.port}')
+        cmd.append(self.args.oid)
+        
+        return cmd
             
     def process_mib_mode(self):
         """Procesa desde archivo MIB"""
-        print(f"Processing MIB mode for OID: {self.args.oid}")
+        print(f"Procesando modo MIB para OID: {self.args.oid}")
         # Esta sería la implementación completa del modo MIB
         # Por ahora simulamos el procesamiento básico
         self.generate_basic_template()
         
     def process_walk_mode(self):
         """Procesa desde SNMP walk"""
-        print(f"Processing SNMP walk mode for {self.args.ip}")
+        print(f"Procesando modo SNMP walk para {self.args.ip}")
         
-        # Construir comando snmpwalk
-        cmd = ['snmpwalk', '-v', self.args.snmpver, '-On', '-c', self.args.community, 
-               f'{self.args.ip}:{self.args.port}', self.args.oid]
+        # Construir y ejecutar comando snmpwalk
+        cmd = self.build_snmp_command()
         
         try:
-            result = subprocess.check_output(cmd, text=True)
+            result = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
             oids = result.strip().split('\n')
-            print(f"Processing {len(oids)} OIDs")
+            print(f"Procesando {len(oids)} OIDs")
             
             template_name = "SNMP Template"
             
@@ -195,18 +267,25 @@ class MIB2ZabbixGenerator:
                     table_name = f"{mib_name.split('::')[0]}::{oid_parts[8]}"
                     if table_name not in self.processor.discovery_rules:
                         self.processor.discovery_rules[table_name] = []
+                        self.processor.last_part_10 = ""
                     
-                    # Simplificación: agregar como item prototype
-                    item_proto = [
-                        oid_parts[10] if len(oid_parts) > 10 else "column",
-                        mib_name,
-                        mib_name.replace("::", "."),
-                        oid,
-                        self.processor.get_data_type(snmp_type),
-                        description
-                    ]
-                    self.processor.discovery_rules[table_name].append(item_proto)
-                    print(f"ITEM_PROTOTYPE -> {table_name}")
+                    # Evitar duplicados en tabla
+                    if len(oid_parts) > 10 and self.processor.last_part_10 != oid_parts[10]:
+                        # Crear OID base para item prototype
+                        oid_base_parts = oid.split('.')[:-1]
+                        oid_base = '.'.join(oid_base_parts)
+                        
+                        item_proto = [
+                            oid_parts[10] if len(oid_parts) > 10 else "column",
+                            mib_name,
+                            mib_name.replace("::", "."),
+                            oid_base,
+                            self.processor.get_data_type(snmp_type),
+                            description
+                        ]
+                        self.processor.discovery_rules[table_name].append(item_proto)
+                        self.processor.last_part_10 = oid_parts[10]
+                        print(f"ITEM_PROTOTYPE -> {table_name}")
                 else:
                     # Procesar como item simple
                     name = mib_name.split("::")[1] if "::" in mib_name else mib_name
@@ -224,7 +303,10 @@ class MIB2ZabbixGenerator:
             self.generate_template(template_name)
             
         except subprocess.CalledProcessError as e:
-            print(f"Error executing snmpwalk: {e}")
+            print(f"Error ejecutando snmpwalk: {e.output if e.output else str(e)}")
+            sys.exit(1)
+        except FileNotFoundError:
+            print("Error: Comando 'snmpwalk' no encontrado. Asegúrate de tener instaladas las herramientas SNMP.")
             sys.exit(1)
             
     def generate_basic_template(self):
@@ -239,11 +321,17 @@ class MIB2ZabbixGenerator:
         self.generate_template(template_name)
         
     def generate_template(self, template_name):
-        """Genera el template XML"""
-        # Crear estructura XML
+        """
+        Genera el template XML de Zabbix
+        
+        Args:
+            template_name (str): Nombre del template
+        """
+        # Crear estructura XML raíz
         root = ET.Element("zabbix_export")
         ET.SubElement(root, "version").text = "6.0"
         
+        # Sección de templates
         templates = ET.SubElement(root, "templates")
         template = ET.SubElement(templates, "template")
         ET.SubElement(template, "uuid").text = uuid.uuid4().hex
@@ -251,12 +339,12 @@ class MIB2ZabbixGenerator:
         ET.SubElement(template, "name").text = f"{template_name} SNMP"
         ET.SubElement(template, "description").text = "Template generated by mib2zabbix-py"
         
-        # Groups
+        # Grupos
         groups = ET.SubElement(template, "groups")
         group = ET.SubElement(groups, "group")
         ET.SubElement(group, "name").text = self.args.group
         
-        # Items
+        # Items simples
         if self.processor.items:
             items = ET.SubElement(template, "items")
             for item in self.processor.items:
@@ -274,7 +362,7 @@ class MIB2ZabbixGenerator:
                 ET.SubElement(item_elem, "status").text = "ENABLED" if self.args.enable_items else "DISABLED"
                 ET.SubElement(item_elem, "delay").text = self.args.check_delay
         
-        # Discovery rules
+        # Reglas de descubrimiento
         if self.processor.discovery_rules:
             discovery_rules = ET.SubElement(template, "discovery_rules")
             for rule_name, item_prototypes in self.processor.discovery_rules.items():
@@ -286,8 +374,11 @@ class MIB2ZabbixGenerator:
                 ET.SubElement(rule, "status").text = "DISABLED"
                 ET.SubElement(rule, "type").text = "SNMP_AGENT"
                 
+                # Item prototypes
                 if item_prototypes:
                     prototypes = ET.SubElement(rule, "item_prototypes")
+                    snmp_oids = ""
+                    
                     for proto in item_prototypes:
                         proto_elem = ET.SubElement(prototypes, "item_prototype")
                         ET.SubElement(proto_elem, "uuid").text = uuid.uuid4().hex
@@ -300,23 +391,37 @@ class MIB2ZabbixGenerator:
                         ET.SubElement(proto_elem, "delay").text = self.args.check_delay
                         ET.SubElement(proto_elem, "history").text = f"{self.args.history}d"
                         ET.SubElement(proto_elem, "description").text = proto[5]
+                        
+                        # Construir cadena de OIDs para discovery
+                        oid_append = "{#" + proto[0].upper() + "}," + proto[3] + ","
+                        if(len(snmp_oids + oid_append) < 501):
+                            snmp_oids += oid_append
+                    
+                    # Agregar OID de descubrimiento
+                    if snmp_oids:
+                        ET.SubElement(rule, "snmp_oid").text = f"discovery[{snmp_oids[:-1]}]"
         
-        # Pretty print XML
+        # Formatear XML de manera legible
         rough_string = ET.tostring(root, encoding='unicode')
         reparsed = minidom.parseString(rough_string)
         xml_string = reparsed.toprettyxml(indent="  ")
         xml_string = '\n'.join([line for line in xml_string.split('\n') if line.strip()])
         
-        # Output
+        # Salida del resultado
         if self.args.filename == 'stdout':
             print(xml_string)
         else:
-            with open(self.args.filename, 'w') as f:
+            # Crear nombre de archivo basado en template name si no se especifica
+            filename = self.args.filename
+            if filename == 'stdout':
+                filename = f"template-{template_name.replace(' ', '-')}.xml"
+                
+            with open(filename, 'w') as f:
                 f.write(xml_string)
-            print(f"Template saved to {self.args.filename}")
+            print(f"Template guardado en {filename}")
     
     def run(self):
-        """Ejecuta el generador"""
+        """Ejecuta el generador principal"""
         self.parse_arguments()
         
         if self.args.mode == 'mib':
